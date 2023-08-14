@@ -1,7 +1,13 @@
+HYDRA_FULL_ERROR=1
+
 import random
 
 from src.models.modules.cond_DDPM import GaussianDiffusion
 from src.models.modules.OpenAI_Unet import UNetModel as OpenAI_UNet
+# from src.models.modules.Mask_DIT import DiT
+# from src.models.modules.fast_DiT import DiT
+# from src.models.modules.DiT import DiT
+from src.models.modules.MDT import MDT
 import matplotlib.pyplot as plt
 import torch
 from src.utils.utils_eval import _test_step, _test_end, get_eval_dictionary
@@ -12,7 +18,7 @@ from typing import Any, List
 import torchio as tio
 from src.utils.patch_sampling import BoxSampler
 from src.utils.generate_noise import gen_noise
-
+import pywt
 
 def get_freq_image(slice):
     choice = random.randint(0, 1)
@@ -65,6 +71,64 @@ def get_freq_image(slice):
     return torch.from_numpy(masked_image).cuda()
 
 
+def get_wavelet_image(slice):
+    choice = random.randint(0, 1)
+
+    if (choice == 0):
+        val = random.randint(2, 10)
+
+        coeffs = pywt.dwt2(slice, 'db1')
+        avg_img, _ = coeffs[0], coeffs[1]
+
+        # Create a mask to extract a specific region (e.g., a square in the center)
+        mask = np.zeros_like(avg_img)
+        rows, cols = mask.shape
+        center_row, center_col = rows // 2, cols // 2
+        mask[center_row - val: center_row + val, center_col - val: center_col + val] = 1
+
+        # Apply the mask to the Fourier transform
+        masked_wavelet = np.multiply(avg_img, mask)
+        masked_coeff = (masked_wavelet, _)
+
+        # Compute the inverse Fourier transform
+        reconstructed_image = pywt.idwt2(masked_coeff, 'haar')
+
+        # Extract the masked region from the original image
+        masked_image = slice - reconstructed_image
+
+        # Display the extracted masked region
+        # show_two_images_side_by_side(slice2, input[i, 0, :, :])
+
+    else:
+        val = random.randint(2, 10)
+
+        coeffs = pywt.dwt2(slice, 'db1')
+        avg_img, _ = coeffs[0], coeffs[1]
+
+        # Create an inverse mask
+        mask = np.zeros_like(avg_img)
+        rows, cols = mask.shape
+        center_row, center_col = rows // 2, cols // 2
+        mask[center_row - val: center_row + val, center_col - val: center_col + val] = 1
+        inverse_mask = 1 - mask
+
+        # Apply the inverse mask to the Fourier transform
+        # masked_wavelet = coeffs[0] * inverse_mask
+        # masked_coeff = (masked_wavelet, coeffs[1], coeffs[2])
+
+        masked_wavelet = np.multiply(avg_img, inverse_mask)
+        masked_coeff = (masked_wavelet, _)
+
+        # Compute the inverse Fourier transform
+        reconstructed_image = pywt.idwt2(masked_coeff, 'haar')
+
+        # Extract the masked region from the original image
+        masked_image = slice - reconstructed_image
+        # masked_image = masked_image * true_mask_slice_array
+
+    return torch.from_numpy(masked_image).cuda()
+
+
 def show_two_images_side_by_side(image1, image2):
     plt.figure(figsize=(10, 5))
 
@@ -94,31 +158,41 @@ class DDPM_2D(LightningModule):
 
         # Model
 
-        model = OpenAI_UNet(
-            image_size=(int(cfg.imageDim[0] / cfg.rescaleFactor), int(cfg.imageDim[1] / cfg.rescaleFactor)),
+        # model = OpenAI_UNet(
+        #     image_size=(int(cfg.imageDim[0] / cfg.rescaleFactor), int(cfg.imageDim[1] / cfg.rescaleFactor)),
+        #     in_channels=1,
+        #     model_channels=cfg.get('unet_dim', 64),
+        #     out_channels=1,
+        #     num_res_blocks=cfg.get('num_res_blocks', 3),
+        #     attention_resolutions=(
+        #     int(cfg.imageDim[0]) / int(32), int(cfg.imageDim[0]) / int(16), int(cfg.imageDim[0]) / int(8)),
+        #     dropout=cfg.get('dropout_unet', 0),  # default is 0.1
+        #     channel_mult=cfg.get('dim_mults', [1, 2, 4, 8]),
+        #     conv_resample=True,
+        #     dims=2,
+        #     num_classes=None,
+        #     use_checkpoint=True,
+        #     use_fp16=True,
+        #     num_heads=cfg.get('num_heads', 1),
+        #     num_head_channels=64,
+        #     num_heads_upsample=-1,
+        #     use_scale_shift_norm=True,
+        #     resblock_updown=True,
+        #     use_new_attention_order=True,
+        #     use_spatial_transformer=False,
+        #     transformer_depth=1,
+        # )
+        # model.convert_to_fp16()
+
+        model = MDT(
+            input_size=int(cfg.imageDim[0] / cfg.rescaleFactor),
+            patch_size=2,
             in_channels=1,
-            model_channels=cfg.get('unet_dim', 64),
-            out_channels=1,
-            num_res_blocks=cfg.get('num_res_blocks', 3),
-            attention_resolutions=(
-            int(cfg.imageDim[0]) / int(32), int(cfg.imageDim[0]) / int(16), int(cfg.imageDim[0]) / int(8)),
-            dropout=cfg.get('dropout_unet', 0),  # default is 0.1
-            channel_mult=cfg.get('dim_mults', [1, 2, 4, 8]),
-            conv_resample=True,
-            dims=2,
-            num_classes=None,
-            use_checkpoint=True,
-            use_fp16=True,
-            num_heads=cfg.get('num_heads', 1),
-            num_head_channels=64,
-            num_heads_upsample=-1,
-            use_scale_shift_norm=True,
-            resblock_updown=True,
-            use_new_attention_order=True,
-            use_spatial_transformer=False,
-            transformer_depth=1,
+            num_classes=0,
+            num_heads=8,
+            depth=4,
+            learn_sigma=False
         )
-        model.convert_to_fp16()
 
         timesteps = cfg.get('timesteps', 1000)
         self.test_timesteps = cfg.get('test_timesteps', 150)
@@ -178,7 +252,8 @@ class DDPM_2D(LightningModule):
 
             array_2d = np.asarray(slice.cpu())
 
-            freq = get_freq_image(array_2d)
+            # freq = get_freq_image(array_2d)
+            freq = get_wavelet_image(array_2d)
 
             array_2d_mask = (true_mask_slice.cpu())
             col_sums = array_2d_mask.sum(axis=0)

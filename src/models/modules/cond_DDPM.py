@@ -572,7 +572,8 @@ class GaussianDiffusion(nn.Module):
                 x[i, :, box[i,1]:box[i,3], box[i,0]:box[i,2]] = x_patch[i]
 
 
-        model_out = self.model(x, t, cond = None) # predict the noise that has been added to x_start or directly predict x_start from the noisy x, conditioned by the timestep t, cond
+        model_out = self.model(x, t, cond = None, enable_mask=True) # predict the noise that has been added to x_start or directly predict x_start from the noisy x, conditioned by the timestep t, cond
+        # model_out = model_out_dict['x']
 
         if self.objective == 'pred_noise': # predict the noise that has been added to x_start
             print('pred noise yawa')

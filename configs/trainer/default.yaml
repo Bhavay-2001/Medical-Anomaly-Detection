@@ -8,5 +8,5 @@ precision : 16
 num_sanity_val_steps : 0 # This does not work with dp, only with ddp
 check_val_every_n_epoch : 1
 benchmark: True
-overfit_batches: False
-
+overfit_batches: 0
+accelerator: ddp

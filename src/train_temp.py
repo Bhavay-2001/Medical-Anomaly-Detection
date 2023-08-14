@@ -6,7 +6,7 @@ from pytorch_lightning import (
     seed_everything,
 )
 from omegaconf import DictConfig, OmegaConf, open_dict
-from pytorch_lightning.plugins import DDPPlugin
+from pytorch_lightning.plugins import DDPPlugin, DDPSpawnPlugin
 import hydra
 from omegaconf import DictConfig
 from typing import List, Optional
@@ -49,8 +49,9 @@ def train(cfg: DictConfig) -> Optional[float]:
     cfg.logger.wandb.group = cfg.name  # specify group name in wandb 
 
     # Set plugins for lightning trainer
-    if cfg.trainer.get('accelerator',None) == 'ddp': # for better performance in ddp mode
+    if cfg.trainer.get('accelerate',None) == 'ddp': # for better performance in ddp mode
         print("HI")
+        # plugs = DDPPlugin(find_unused_parameters=False)
         plugs = DDPPlugin(find_unused_parameters=False)
     else: 
         plugs = None
@@ -117,8 +118,11 @@ def train(cfg: DictConfig) -> Optional[float]:
         # Init lightning trainer
         log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
         trainer: Trainer = hydra.utils.instantiate(
-            cfg.trainer, callbacks=callbacks, logger=logger, _convert_="partial", plugins=plugs
-        )          
+            cfg.trainer, logger=logger, _convert_="partial", plugins=plugs ,callbacks=callbacks,
+        ) 
+        # trainer: Trainer = hydra.utils.instantiate(
+        #     cfg.trainer, logger=logger ,callbacks=callbacks,
+        # )          
 
         # Send some parameters from config to all lightning loggers
         log.info("Logging hyperparameters!")
@@ -134,6 +138,7 @@ def train(cfg: DictConfig) -> Optional[float]:
 
         if (not cfg.get('onlyEval',False) or cfg.get('resume_train',False)) : # train model
             trainer.fit(model, datamodule_train)
+            # trainer.save_checkpoint("epoch-{epoch}_step-{step}_loss-{val/Loss_comb:.2f}.ckpt")
             validation_metrics = trainer.callback_metrics
         else: # load trained model
             model.load_state_dict(torch.load(checkpoints[f'fold-{fold+1}'])['state_dict'])
@@ -220,3 +225,4 @@ def train(cfg: DictConfig) -> Optional[float]:
         callbacks=callbacks,
         logger=logger,
     )
+
